@@ -45,6 +45,10 @@ func main() {
 	importService := coverage.NewImportService(db, cfg)
 	importService.RegisterImportRoutes(r)
 
+	// Register city management endpoints
+	cityService := coverage.NewCityService(db)
+	cityService.RegisterCityRoutes(r)
+
 	api := r.Group("/api")
 	{
 		api.GET("/health", func(c *gin.Context) {
