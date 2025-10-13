@@ -8,6 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o strava-coverage ./cmd/server/main.go
 
 # Final image
 FROM alpine:latest
+RUN apk add --no-cache postgresql-client
 WORKDIR /app
 COPY --from=builder /app/strava-coverage ./strava-coverage
 COPY config ./config

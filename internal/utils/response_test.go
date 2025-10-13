@@ -124,15 +124,15 @@ func TestValidationErrors(t *testing.T) {
 	assert.Len(t, ve.Errors, 0)
 
 	// Test adding errors
-ve.AddError("field1", "Field is required", "")
-ve.AddError("field2", "Invalid format", "")
+	ve.AddError("field1", "Field is required", "")
+	ve.AddError("field2", "Invalid format", "")
 
 	assert.True(t, ve.HasErrors())
 	assert.Len(t, ve.Errors, 2)
-assert.Equal(t, "field1", ve.Errors[0].Field)
-assert.Equal(t, "Field is required", ve.Errors[0].Message)
-assert.Equal(t, "field2", ve.Errors[1].Field)
-assert.Equal(t, "Invalid format", ve.Errors[1].Message)
+	assert.Equal(t, "field1", ve.Errors[0].Field)
+	assert.Equal(t, "Field is required", ve.Errors[0].Message)
+	assert.Equal(t, "field2", ve.Errors[1].Field)
+	assert.Equal(t, "Invalid format", ve.Errors[1].Message)
 }
 
 func TestValidateRequest(t *testing.T) {
@@ -256,7 +256,7 @@ func TestSuccessResponse(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 
-SuccessResponse(c, testData)
+	SuccessResponse(c, testData)
 
 	assert.Equal(t, 200, w.Code)
 
@@ -264,8 +264,8 @@ SuccessResponse(c, testData)
 	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
 	require.NoError(t, err)
 
-assert.Equal(t, testData["message"], responseBody["data"].(map[string]interface{})["message"])
-assert.Equal(t, float64(5), responseBody["data"].(map[string]interface{})["count"]) // JSON unmarshals numbers as float64
+	assert.Equal(t, testData["message"], responseBody["data"].(map[string]interface{})["message"])
+	assert.Equal(t, float64(5), responseBody["data"].(map[string]interface{})["count"]) // JSON unmarshals numbers as float64
 }
 
 func TestPaginatedResponse(t *testing.T) {

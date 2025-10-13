@@ -249,7 +249,7 @@ func (s *InitialImportService) importSingleActivity(userID int, activityID int64
 	}
 
 	if resp.StatusCode() != 200 {
-		return fmt.Errorf("Strava API error: %d", resp.StatusCode())
+		return fmt.Errorf("strava API error: %d", resp.StatusCode())
 	}
 
 	// Parse streams

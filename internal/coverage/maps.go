@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
+	"github.com/nikhilvedi/strava-coverage/internal/utils"
 )
 
 // MapService handles map-related operations and GeoJSON generation
@@ -104,6 +105,9 @@ type Bounds struct {
 
 // GetCitiesGeoJSONHandler returns all cities as GeoJSON
 func (s *MapService) GetCitiesGeoJSONHandler(c *gin.Context) {
+	logger := utils.NewLogger("MapService")
+	logger.Info("Fetching cities GeoJSON data")
+
 	query := `
 		SELECT 
 			id, name, country_code,
@@ -114,7 +118,9 @@ func (s *MapService) GetCitiesGeoJSONHandler(c *gin.Context) {
 
 	rows, err := s.DB.Query(query)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch cities"})
+		logger.Error("Failed to fetch cities: %v", err)
+		apiErr := utils.NewAPIError(500, "Database error", "Failed to fetch cities data")
+		utils.ErrorResponse(c, apiErr)
 		return
 	}
 	defer rows.Close()
