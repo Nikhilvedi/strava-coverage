@@ -1,0 +1,30 @@
+version: '3.9'
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: always
+    environment:
+      POSTGRES_DB: strava_coverage
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  backend:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DB_URL: postgres://postgres:postgres@db:5432/strava_coverage?sslmode=disable
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI}
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+volumes:
+  pgdata:

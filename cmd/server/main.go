@@ -8,6 +8,7 @@ import (
 	"github.com/nikhilvedi/strava-coverage/config"
 	"github.com/nikhilvedi/strava-coverage/internal/auth"
 	"github.com/nikhilvedi/strava-coverage/internal/coverage"
+	"github.com/nikhilvedi/strava-coverage/internal/middleware"
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
 )
 
@@ -27,15 +28,11 @@ func main() {
 	// Recovery middleware
 	r.Use(gin.Recovery())
 
-	// Add logging middleware
-	r.Use(func(c *gin.Context) {
-		// Log the request
-		log.Printf("Request: %s %s", c.Request.Method, c.Request.URL.Path)
-
-		// Log the response
-		c.Next()
-		log.Printf("Response Status: %d", c.Writer.Status())
-	})
+	// Add custom middleware
+	r.Use(middleware.RequestIDMiddleware())
+	r.Use(middleware.LoggingMiddleware())
+	r.Use(middleware.ErrorHandlingMiddleware())
+	r.Use(middleware.CORSMiddleware())
 
 	// Initialize and setup auth service
 	authService := auth.NewService(cfg, db)
@@ -72,6 +69,10 @@ func main() {
 	// Register initial import endpoints
 	initialImportService := coverage.NewInitialImportService(db, cfg, coverageService, commentService, detectionService)
 	initialImportService.RegisterInitialImportRoutes(r)
+
+	// Register map endpoints
+	mapService := coverage.NewMapService(db)
+	mapService.RegisterMapRoutes(r)
 
 	api := r.Group("/api")
 	{

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
+	"github.com/nikhilvedi/strava-coverage/internal/utils"
 )
 
 // CoverageService handles coverage calculation operations
@@ -43,12 +44,17 @@ type CoverageResult struct {
 
 // CalculateCoverageHandler calculates coverage for a specific activity
 func (s *CoverageService) CalculateCoverageHandler(c *gin.Context) {
+	logger := utils.NewLogger("CoverageService")
+
 	activityIDStr := c.Param("activityId")
 	activityID, err := strconv.ParseInt(activityIDStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid activity ID"})
+		apiErr := utils.NewAPIError(400, "Invalid activity ID", "Activity ID must be a valid integer")
+		utils.ErrorResponse(c, apiErr)
 		return
 	}
+
+	logger.Info("Calculating coverage for activity %d", activityID)
 
 	// First, check if the activity exists and get its details
 	var userID int
@@ -57,9 +63,12 @@ func (s *CoverageService) CalculateCoverageHandler(c *gin.Context) {
 	err = s.DB.QueryRow(query, activityID).Scan(&userID, &activityPath)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Activity not found"})
+			apiErr := utils.NewAPIError(404, "Activity not found", fmt.Sprintf("No activity found with ID %d", activityID))
+			utils.ErrorResponse(c, apiErr)
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch activity"})
+			logger.Error("Failed to fetch activity %d: %v", activityID, err)
+			apiErr := utils.NewAPIError(500, "Database error", "Failed to retrieve activity data")
+			utils.ErrorResponse(c, apiErr)
 		}
 		return
 	}
@@ -78,17 +87,24 @@ func (s *CoverageService) CalculateCoverageHandler(c *gin.Context) {
 	err = s.DB.QueryRow(cityQuery, activityID).Scan(&cityID, &cityName)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Activity does not intersect with any tracked city"})
+			apiErr := utils.NewAPIError(404, "No city intersection", "Activity does not intersect with any tracked city")
+			utils.ErrorResponse(c, apiErr)
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find intersecting city"})
+			logger.Error("Failed to find intersecting city for activity %d: %v", activityID, err)
+			apiErr := utils.NewAPIError(500, "Database error", "Failed to find intersecting city")
+			utils.ErrorResponse(c, apiErr)
 		}
 		return
 	}
 
+	logger.Info("Activity %d intersects with city %s (ID: %d)", activityID, cityName, cityID)
+
 	// Calculate coverage using a grid-based approach
 	result, err := s.calculateGridBasedCoverage(userID, activityID, cityID, cityName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to calculate coverage: %v", err)})
+		logger.Error("Failed to calculate coverage for activity %d: %v", activityID, err)
+		apiErr := utils.NewAPIError(500, "Coverage calculation failed", "Unable to calculate street coverage")
+		utils.ErrorResponse(c, apiErr)
 		return
 	}
 

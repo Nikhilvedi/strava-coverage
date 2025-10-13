@@ -27,7 +27,7 @@ func main() {
 	defer db.Close()
 
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run test_import.go [command]")
+		fmt.Println("Usage: go run test.go [command]")
 		fmt.Println("Commands:")
 		fmt.Println("  test-status <user_id>   - Check import status for user")
 		fmt.Println("  list-users              - List users with Strava tokens")
@@ -54,9 +54,9 @@ func testImportStatus(db *storage.DB, userIDStr string) {
 	fmt.Printf("Testing import status for user %s...\n", userIDStr)
 
 	// Check if user exists in strava_tokens
-	query := "SELECT athlete_id FROM strava_tokens WHERE athlete_id = $1"
-	var athleteID int
-	err := db.QueryRow(query, userIDStr).Scan(&athleteID)
+	query := "SELECT user_id FROM strava_tokens WHERE user_id = $1"
+	var userID int
+	err := db.QueryRow(query, userIDStr).Scan(&userID)
 	if err != nil {
 		fmt.Printf("❌ User %s not found in strava_tokens table\n", userIDStr)
 		fmt.Println("💡 Make sure the user has completed OAuth flow first")
@@ -103,10 +103,10 @@ func listUsers(db *storage.DB) {
 	fmt.Println("Listing users with Strava tokens...")
 
 	query := `
-		SELECT athlete_id, access_token IS NOT NULL as has_token, 
+		SELECT user_id, access_token IS NOT NULL as has_token, 
 		       expires_at, refresh_token IS NOT NULL as has_refresh
 		FROM strava_tokens 
-		ORDER BY athlete_id`
+		ORDER BY user_id`
 
 	rows, err := db.Query(query)
 	if err != nil {
@@ -116,11 +116,11 @@ func listUsers(db *storage.DB) {
 
 	count := 0
 	for rows.Next() {
-		var athleteID int
+		var userID int
 		var hasToken, hasRefresh bool
 		var expiresAt string
 
-		err := rows.Scan(&athleteID, &hasToken, &expiresAt, &hasRefresh)
+		err := rows.Scan(&userID, &hasToken, &expiresAt, &hasRefresh)
 		if err != nil {
 			continue
 		}
@@ -132,7 +132,7 @@ func listUsers(db *storage.DB) {
 			status = "🟡"
 		}
 
-		fmt.Printf("%s User %d (expires: %s)\n", status, athleteID, expiresAt)
+		fmt.Printf("%s User %d (expires: %s)\n", status, userID, expiresAt)
 		count++
 	}
 
