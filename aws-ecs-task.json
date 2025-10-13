@@ -1,0 +1,64 @@
+{
+  "family": "strava-coverage",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "strava-coverage",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/strava-coverage:latest",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "GIN_MODE",
+          "value": "release"
+        },
+        {
+          "name": "STRAVA_REDIRECT_URI", 
+          "value": "https://YOUR_DOMAIN/oauth/callback"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "STRAVA_CLIENT_ID",
+          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/strava/client_id"
+        },
+        {
+          "name": "STRAVA_CLIENT_SECRET",
+          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/strava/client_secret"
+        },
+        {
+          "name": "DB_URL",
+          "valueFrom": "arn:aws:ssm:REGION:ACCOUNT_ID:parameter/strava/db_url"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/strava-coverage",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
