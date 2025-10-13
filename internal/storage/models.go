@@ -1,10 +1,33 @@
 package storage
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // GetTokenByUserID fetches the token for a user (by string userID)
 func GetTokenByUserID(db *DB, token *StravaToken, userID string) error {
-	return db.Get(token, "SELECT * FROM strava_tokens WHERE user_id = $1", userID)
+	// Convert string userID to int64 for database lookup
+	var stravaID int64
+	if _, err := fmt.Sscanf(userID, "%d", &stravaID); err != nil {
+		return fmt.Errorf("invalid strava_id format: %s", userID)
+	}
+
+	fmt.Printf("Looking up user with Strava ID: %d\n", stravaID)
+	var id int
+	if err := db.Get(&id, "SELECT id FROM users WHERE strava_id = $1", stravaID); err != nil {
+		fmt.Printf("Error finding user: %v\n", err)
+		return fmt.Errorf("failed to find user with strava_id %d: %v", stravaID, err)
+	}
+	fmt.Printf("Found user with internal ID: %d\n", id)
+
+	err := db.Get(token, "SELECT * FROM strava_tokens WHERE user_id = $1", id)
+	if err != nil {
+		fmt.Printf("Error finding token: %v\n", err)
+		return fmt.Errorf("failed to find token for user_id %d: %v", id, err)
+	}
+	fmt.Printf("Successfully found token for user_id %d\n", id)
+	return nil
 }
 
 // User represents a user in the database

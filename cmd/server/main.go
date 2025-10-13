@@ -1,13 +1,8 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhilvedi/strava-coverage/config"
@@ -26,7 +21,21 @@ func main() {
 	}
 	defer db.Close()
 
-	r := gin.Default()
+	gin.SetMode(gin.DebugMode)
+	r := gin.New()
+
+	// Recovery middleware
+	r.Use(gin.Recovery())
+
+	// Add logging middleware
+	r.Use(func(c *gin.Context) {
+		// Log the request
+		log.Printf("Request: %s %s", c.Request.Method, c.Request.URL.Path)
+
+		// Log the response
+		c.Next()
+		log.Printf("Response Status: %d", c.Writer.Status())
+	})
 
 	// Initialize and setup auth service
 	authService := auth.NewService(cfg, db)
@@ -43,32 +52,12 @@ func main() {
 		})
 	}
 
-	srv := &http.Server{
-		Addr:    ":8080",
-		Handler: r,
+	// Run the server directly without graceful shutdown
+	addr := ":8080"
+	log.Printf("Server listening on %s\n", addr)
+	if err := r.Run(addr); err != nil {
+		log.Fatalf("Server error: %v\n", err)
 	}
 
-	// Graceful shutdown handling
-	go func() {
-		log.Printf("Server listening on %s\n", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v\n", err)
-		}
-	}()
-
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("Shutting down server...")
-
-	// Give outstanding requests a deadline for completion
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v\n", err)
-	}
-
-	log.Println("Server exited gracefully")
+	log.Println("Server exiting...")
 }
