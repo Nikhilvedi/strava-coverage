@@ -88,11 +88,15 @@ func (s *Service) handleCallback(c *gin.Context) {
 		return
 	}
 
-	// Store the token in the database
-	user, err := s.db.CreateUser(tokenResp.Athlete.ID)
+	// Get or create user in the database
+	user, err := s.db.GetUserByStravaID(tokenResp.Athlete.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
-		return
+		// If user doesn't exist, create them
+		user, err = s.db.CreateUser(tokenResp.Athlete.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+			return
+		}
 	}
 
 	token := &storage.StravaToken{

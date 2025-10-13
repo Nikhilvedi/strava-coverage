@@ -202,9 +202,30 @@ func (s *CityDetectionService) AutoDetectUserCitiesHandler(c *gin.Context) {
 		})
 	}
 
+	// Update activities with their primary city assignments
+	updateQuery := `
+		UPDATE activities 
+		SET city_id = (
+			SELECT c.id 
+			FROM cities c 
+			WHERE ST_Intersects(activities.path, c.boundary)
+			ORDER BY ST_Length(ST_Transform(ST_Intersection(activities.path, c.boundary), 3857)) DESC
+			LIMIT 1
+		)
+		WHERE user_id = $1 AND city_id IS NULL`
+
+	result, err := s.DB.Exec(updateQuery, userIDStr)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update activity cities"})
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+
 	c.JSON(http.StatusOK, gin.H{
-		"user_id": userIDStr,
-		"cities":  userCities,
-		"message": fmt.Sprintf("Found %d cities with activities", len(userCities)),
+		"user_id":            userIDStr,
+		"cities":             userCities,
+		"updated_activities": rowsAffected,
+		"message":            fmt.Sprintf("Found %d cities with activities, updated %d activity assignments", len(userCities), rowsAffected),
 	})
 }

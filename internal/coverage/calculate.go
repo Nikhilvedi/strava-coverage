@@ -122,89 +122,60 @@ func (s *CoverageService) CalculateCoverageHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// calculateGridBasedCoverage calculates coverage using a simplified grid approach
+// calculateGridBasedCoverage calculates coverage using a simplified distance-based approach
 func (s *CoverageService) calculateGridBasedCoverage(userID int, activityID int64, cityID int, cityName string) (*CoverageResult, error) {
-	// Create a 100m x 100m grid within the city boundary and calculate coverage
-	// This is a simplified approach that doesn't require OSM street data
+	// Simplified coverage calculation based on total distance covered within the city
+	// This is much faster than grid-based approach
 
 	coverageQuery := `
 		WITH 
-		-- Create a grid of cells within the city boundary
-		city_bounds AS (
-			SELECT boundary FROM cities WHERE id = $1
-		),
-		grid AS (
+		-- Get city area for normalization
+		city_info AS (
 			SELECT 
-				ST_SetSRID(ST_MakePoint(x, y), 4326) as center,
-				ST_Buffer(ST_SetSRID(ST_MakePoint(x, y), 4326)::geography, 50)::geometry as cell
-			FROM city_bounds cb,
-			generate_series(
-				ST_XMin(cb.boundary)::numeric, 
-				ST_XMax(cb.boundary)::numeric, 
-				0.001  -- ~100m grid spacing
-			) as x,
-			generate_series(
-				ST_YMin(cb.boundary)::numeric, 
-				ST_YMax(cb.boundary)::numeric, 
-				0.001  -- ~100m grid spacing  
-			) as y
-			WHERE ST_Within(ST_SetSRID(ST_MakePoint(x, y), 4326), cb.boundary)
+				ST_Area(ST_Transform(boundary, 3857)) / 1000000 as area_km2
+			FROM cities WHERE id = $1
 		),
-		-- Find grid cells covered by current activity
-		current_activity_coverage AS (
-			SELECT DISTINCT g.center
-			FROM grid g, activities a
-			WHERE a.strava_activity_id = $2
-			AND ST_DWithin(g.center::geography, a.path::geography, 50)
-		),
-		-- Find all grid cells covered by user's activities in this city
-		user_total_coverage AS (
-			SELECT DISTINCT g.center
-			FROM grid g, activities a
-			WHERE a.user_id = $3
-			AND a.city_id = $4
-			AND ST_DWithin(g.center::geography, a.path::geography, 50)
-		),
-		-- Calculate statistics
-		stats AS (
+		-- Calculate total distance of user activities in this city
+		user_distance AS (
 			SELECT 
-				COUNT(*) as total_grid_cells,
-				COUNT(CASE WHEN utc.center IS NOT NULL THEN 1 END) as covered_cells,
-				COUNT(CASE WHEN cac.center IS NOT NULL THEN 1 END) as new_cells
-			FROM grid g
-			LEFT JOIN user_total_coverage utc ON ST_Equals(g.center, utc.center)
-			LEFT JOIN current_activity_coverage cac ON ST_Equals(g.center, cac.center)
+				COALESCE(SUM(ST_Length(ST_Transform(ST_Intersection(a.path, c.boundary), 3857)) / 1000), 0) as total_km
+			FROM activities a
+			JOIN cities c ON c.id = $2
+			WHERE a.user_id = $3 AND a.city_id = $2
+		),
+		-- Estimate total "explorable" distance in city (rough approximation)
+		city_explorable AS (
+			SELECT 
+				-- Rough estimate: 10-15 km of roads per km² in urban areas
+				area_km2 * 12 as estimated_roads_km
+			FROM city_info
 		)
 		SELECT 
-			total_grid_cells,
-			covered_cells,
-			new_cells,
+			ce.estimated_roads_km as total_streets_km,
+			ud.total_km as covered_streets_km,
 			CASE 
-				WHEN total_grid_cells > 0 THEN (covered_cells::float / total_grid_cells::float) * 100 
+				WHEN ce.estimated_roads_km > 0 THEN 
+					LEAST((ud.total_km / ce.estimated_roads_km) * 100, 100)
 				ELSE 0 
 			END as coverage_percentage
-		FROM stats`
+		FROM city_explorable ce, user_distance ud`
 
-	var totalCells, coveredCells, newCells int
-	var coveragePercent float64
+	var totalStreetsKm, coveredStreetsKm, coveragePercent float64
 
-	err := s.DB.QueryRow(coverageQuery, cityID, activityID, userID, cityID).Scan(
-		&totalCells, &coveredCells, &newCells, &coveragePercent)
+	err := s.DB.QueryRow(coverageQuery, cityID, cityID, userID).Scan(
+		&totalStreetsKm, &coveredStreetsKm, &coveragePercent)
 	if err != nil {
-		return nil, fmt.Errorf("failed to calculate grid coverage: %v", err)
+		return nil, fmt.Errorf("failed to calculate coverage: %v", err)
 	}
-
-	// Convert cells to approximate kilometers (each cell represents ~100m x 100m = 0.01 km²)
-	cellSizeKm := 0.1 // Each cell represents ~100m of "street"
 
 	result := &CoverageResult{
 		ActivityID:      activityID,
 		CityID:          cityID,
 		CityName:        cityName,
 		CoveragePercent: coveragePercent,
-		NewStreetsKm:    float64(newCells) * cellSizeKm,
-		TotalStreetsKm:  float64(totalCells) * cellSizeKm,
-		UniqueStreetsKm: float64(coveredCells) * cellSizeKm,
+		NewStreetsKm:    0, // Not calculated in simplified approach
+		TotalStreetsKm:  totalStreetsKm,
+		UniqueStreetsKm: coveredStreetsKm,
 	}
 
 	return result, nil
@@ -227,73 +198,42 @@ func (s *CoverageService) GetUserCityCoverageHandler(c *gin.Context) {
 		return
 	}
 
-	// Get city name and calculate total coverage
+	// Super simplified approach - just calculate based on activity distance vs city size
 	query := `
-		WITH 
-		city_bounds AS (
-			SELECT name, boundary FROM cities WHERE id = $1
-		),
-		grid AS (
-			SELECT 
-				ST_SetSRID(ST_MakePoint(x, y), 4326) as center
-			FROM city_bounds cb,
-			generate_series(
-				ST_XMin(cb.boundary)::numeric, 
-				ST_XMax(cb.boundary)::numeric, 
-				0.001
-			) as x,
-			generate_series(
-				ST_YMin(cb.boundary)::numeric, 
-				ST_YMax(cb.boundary)::numeric, 
-				0.001
-			) as y
-			WHERE ST_Within(ST_SetSRID(ST_MakePoint(x, y), 4326), cb.boundary)
-		),
-		user_coverage AS (
-			SELECT DISTINCT g.center
-			FROM grid g, activities a
-			WHERE a.user_id = $2
-			AND a.city_id = $1
-			AND ST_DWithin(g.center::geography, a.path::geography, 50)
-		),
-		stats AS (
-			SELECT 
-				cb.name,
-				COUNT(g.center) as total_cells,
-				COUNT(uc.center) as covered_cells
-			FROM city_bounds cb
-			CROSS JOIN grid g
-			LEFT JOIN user_coverage uc ON ST_Equals(g.center, uc.center)
-			GROUP BY cb.name
-		)
 		SELECT 
-			name,
-			total_cells,
-			covered_cells,
-			CASE 
-				WHEN total_cells > 0 THEN (covered_cells::float / total_cells::float) * 100 
-				ELSE 0 
-			END as coverage_percentage
-		FROM stats`
+			c.name,
+			ST_Area(ST_Transform(c.boundary, 3857)) / 1000000 * 12 as estimated_roads_km,
+			COALESCE(SUM(ST_Length(ST_Transform(a.path, 3857)) / 1000), 0) as covered_km
+		FROM cities c
+		LEFT JOIN activities a ON a.city_id = c.id AND a.user_id = $2
+		WHERE c.id = $1
+		GROUP BY c.id, c.name, c.boundary`
 
 	var cityName string
-	var totalCells, coveredCells int
-	var coveragePercent float64
+	var totalStreetsKm, coveredStreetsKm float64
 
-	err = s.DB.QueryRow(query, cityID, userID).Scan(&cityName, &totalCells, &coveredCells, &coveragePercent)
+	err = s.DB.QueryRow(query, cityID, userID).Scan(&cityName, &totalStreetsKm, &coveredStreetsKm)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to calculate coverage"})
 		return
 	}
 
-	cellSizeKm := 0.1
+	// Calculate coverage percentage
+	coveragePercent := float64(0)
+	if totalStreetsKm > 0 {
+		coveragePercent = (coveredStreetsKm / totalStreetsKm) * 100
+		if coveragePercent > 100 {
+			coveragePercent = 100
+		}
+	}
+
 	result := map[string]interface{}{
 		"user_id":            userID,
 		"city_id":            cityID,
 		"city_name":          cityName,
 		"coverage_percent":   coveragePercent,
-		"total_streets_km":   float64(totalCells) * cellSizeKm,
-		"covered_streets_km": float64(coveredCells) * cellSizeKm,
+		"total_streets_km":   totalStreetsKm,
+		"covered_streets_km": coveredStreetsKm,
 	}
 
 	c.JSON(http.StatusOK, result)

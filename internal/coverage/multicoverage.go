@@ -85,36 +85,26 @@ type CityStats struct {
 func (s *MultiCityCoverageService) GetUserCoverageSummaryHandler(c *gin.Context) {
 	userID := c.Param("userId")
 
-	// Get coverage for all cities where user has activities
+	// Simplified query to get user's city coverage
 	query := `
-		WITH user_coverage AS (
-			SELECT 
-				c.id as city_id,
-				c.name as city_name,
-				c.country_code,
-				COUNT(DISTINCT g.id) as covered_cells,
-				(SELECT COUNT(*) FROM grid_cells gc WHERE ST_Intersects(gc.geom, c.boundary)) as total_cells,
-				COUNT(DISTINCT a.id) as activity_count,
-				MAX(a.start_date) as last_activity,
-				SUM(ST_Length(ST_Transform(a.path, 3857))) / 1000 as total_distance
-			FROM cities c
-			LEFT JOIN activities a ON a.user_id = $1 AND ST_Intersects(a.path, c.boundary)
-			LEFT JOIN grid_cells g ON ST_Intersects(a.path, g.geom) AND ST_Intersects(g.geom, c.boundary)
-			WHERE EXISTS (
-				SELECT 1 FROM activities act WHERE act.user_id = $1 AND ST_Intersects(act.path, c.boundary)
-			)
-			GROUP BY c.id, c.name, c.country_code
-		)
 		SELECT 
-			city_id,
-			city_name,
-			country_code,
-			COALESCE((covered_cells::float / NULLIF(total_cells, 0)) * 100, 0) as coverage_percent,
-			COALESCE(total_distance, 0) as distance_covered,
-			total_cells * 0.01 as total_distance_km, -- Approximate: 100m cells = 0.01km per cell
-			activity_count,
-			COALESCE(last_activity::text, '') as last_activity
-		FROM user_coverage
+			c.id,
+			c.name,
+			c.country_code,
+			COUNT(a.id) as activity_count,
+			COALESCE(SUM(ST_Length(ST_Transform(a.path, 3857)) / 1000), 0) as distance_covered,
+			ST_Area(ST_Transform(c.boundary, 3857)) / 1000000 * 12 as estimated_total_distance,
+			CASE 
+				WHEN (ST_Area(ST_Transform(c.boundary, 3857)) / 1000000 * 12) > 0 THEN
+					LEAST((COALESCE(SUM(ST_Length(ST_Transform(a.path, 3857)) / 1000), 0) / 
+						  (ST_Area(ST_Transform(c.boundary, 3857)) / 1000000 * 12)) * 100, 100)
+				ELSE 0
+			END as coverage_percent,
+			COALESCE(MAX(a.created_at)::text, '') as last_activity
+		FROM cities c
+		LEFT JOIN activities a ON a.city_id = c.id AND a.user_id = $1
+		WHERE EXISTS (SELECT 1 FROM activities a2 WHERE a2.user_id = $1 AND a2.city_id = c.id)
+		GROUP BY c.id, c.name, c.country_code, c.boundary
 		ORDER BY coverage_percent DESC`
 
 	rows, err := s.DB.Query(query, userID)
@@ -133,8 +123,8 @@ func (s *MultiCityCoverageService) GetUserCoverageSummaryHandler(c *gin.Context)
 	for rows.Next() {
 		var info CityCoverageInfo
 		err := rows.Scan(&info.CityID, &info.CityName, &info.CountryCode,
-			&info.CoveragePercent, &info.DistanceCovered, &info.TotalDistance,
-			&info.ActivityCount, &info.LastActivity)
+			&info.ActivityCount, &info.DistanceCovered, &info.TotalDistance,
+			&info.CoveragePercent, &info.LastActivity)
 		if err != nil {
 			continue
 		}
@@ -181,29 +171,36 @@ func (s *MultiCityCoverageService) GetUserCityLeaderboardHandler(c *gin.Context)
 	}
 
 	query := `
-		WITH city_coverage AS (
+		WITH user_stats AS (
 			SELECT 
-				a.user_id,
-				u.athlete_id,
-				COUNT(DISTINCT g.id) as covered_cells,
-				(SELECT COUNT(*) FROM grid_cells gc 
-				 WHERE ST_Intersects(gc.geom, (SELECT boundary FROM cities WHERE id = $2))) as total_cells,
-				COUNT(DISTINCT a.id) as activity_count
+				a.user_id::text as user_id,
+				u.strava_id as athlete_id,
+				COUNT(a.id) as activity_count,
+				COALESCE(SUM(ST_Length(ST_Transform(a.path, 3857)) / 1000), 0) as distance_covered,
+				(SELECT ST_Area(ST_Transform(boundary, 3857)) / 1000000 * 12 FROM cities WHERE id = $2) as estimated_total
 			FROM activities a
 			JOIN users u ON u.id = a.user_id
-			JOIN grid_cells g ON ST_Intersects(a.path, g.geom)
-			JOIN cities c ON c.id = $2 AND ST_Intersects(a.path, c.boundary) AND ST_Intersects(g.geom, c.boundary)
-			GROUP BY a.user_id, u.athlete_id
+			WHERE a.city_id = $2
+			GROUP BY a.user_id, u.strava_id
 		),
-		ranked_coverage AS (
+		ranked_stats AS (
 			SELECT 
 				user_id,
 				athlete_id,
-				(covered_cells::float / NULLIF(total_cells, 0)) * 100 as coverage_percent,
-				covered_cells * 0.01 as distance_covered,
 				activity_count,
-				ROW_NUMBER() OVER (ORDER BY (covered_cells::float / NULLIF(total_cells, 0)) DESC) as rank
-			FROM city_coverage
+				distance_covered,
+				CASE 
+					WHEN estimated_total > 0 THEN 
+						LEAST((distance_covered / estimated_total) * 100, 100)
+					ELSE 0 
+				END as coverage_percent,
+				ROW_NUMBER() OVER (ORDER BY 
+					CASE 
+						WHEN estimated_total > 0 THEN 
+							LEAST((distance_covered / estimated_total) * 100, 100)
+						ELSE 0 
+					END DESC) as rank
+			FROM user_stats
 		)
 		SELECT 
 			user_id,
@@ -212,7 +209,7 @@ func (s *MultiCityCoverageService) GetUserCityLeaderboardHandler(c *gin.Context)
 			coverage_percent,
 			distance_covered,
 			activity_count
-		FROM ranked_coverage
+		FROM ranked_stats
 		ORDER BY rank
 		LIMIT $3`
 
