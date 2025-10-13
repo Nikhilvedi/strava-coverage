@@ -49,6 +49,18 @@ func main() {
 	cityService := coverage.NewCityService(db)
 	cityService.RegisterCityRoutes(r)
 
+	// Register coverage calculation endpoints
+	coverageService := coverage.NewCoverageService(db)
+	coverageService.RegisterCoverageRoutes(r)
+
+	// Register comment posting endpoints
+	commentService := coverage.NewCommentService(db, cfg)
+	commentService.RegisterCommentRoutes(r)
+
+	// Register automation and webhook endpoints
+	automationService := coverage.NewAutomationService(db, cfg, coverageService, commentService)
+	automationService.RegisterAutomationRoutes(r)
+
 	api := r.Group("/api")
 	{
 		api.GET("/health", func(c *gin.Context) {
