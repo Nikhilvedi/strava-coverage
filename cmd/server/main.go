@@ -61,6 +61,18 @@ func main() {
 	automationService := coverage.NewAutomationService(db, cfg, coverageService, commentService)
 	automationService.RegisterAutomationRoutes(r)
 
+	// Register city detection endpoints
+	detectionService := coverage.NewCityDetectionService(db)
+	detectionService.RegisterCityDetectionRoutes(r)
+
+	// Register multi-city coverage endpoints
+	multiCoverageService := coverage.NewMultiCityCoverageService(db)
+	multiCoverageService.RegisterMultiCityCoverageRoutes(r)
+
+	// Register initial import endpoints
+	initialImportService := coverage.NewInitialImportService(db, cfg, coverageService, commentService, detectionService)
+	initialImportService.RegisterInitialImportRoutes(r)
+
 	api := r.Group("/api")
 	{
 		api.GET("/health", func(c *gin.Context) {
