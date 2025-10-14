@@ -47,6 +47,12 @@ func (s *Service) SetupRoutes(r *gin.Engine) {
 		auth.GET("/authorize", s.handleAuthorize)
 		auth.GET("/callback", s.handleCallback)
 	}
+
+	// User info routes
+	users := r.Group("/api/users")
+	{
+		users.GET("/:id", s.GetUserHandler)
+	}
 }
 
 // handleAuthorize redirects the user to Strava's authorization page
@@ -88,14 +94,45 @@ func (s *Service) handleCallback(c *gin.Context) {
 		return
 	}
 
+	// Fetch athlete details from Strava API to get their actual name
+	athleteResp, err := s.client.R().
+		SetHeader("Authorization", "Bearer "+tokenResp.AccessToken).
+		Get("https://www.strava.com/api/v3/athlete")
+
+	var athleteName string
+	if err != nil {
+		fmt.Printf("Failed to fetch athlete details: %v\n", err)
+		athleteName = "Strava User" // Fallback
+	} else {
+		var athlete struct {
+			FirstName string `json:"firstname"`
+			LastName  string `json:"lastname"`
+		}
+		if err := json.Unmarshal(athleteResp.Body(), &athlete); err != nil {
+			fmt.Printf("Failed to parse athlete details: %v\n", err)
+			athleteName = "Strava User" // Fallback
+		} else {
+			athleteName = fmt.Sprintf("%s %s", athlete.FirstName, athlete.LastName)
+		}
+	}
+
 	// Get or create user in the database
 	user, err := s.db.GetUserByStravaID(tokenResp.Athlete.ID)
 	if err != nil {
 		// If user doesn't exist, create them
-		user, err = s.db.CreateUser(tokenResp.Athlete.ID)
+		user, err = s.db.CreateUser(tokenResp.Athlete.ID, athleteName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 			return
+		}
+	} else {
+		// User exists, update their name if it's different or empty
+		if user.Name != athleteName && athleteName != "Strava User" {
+			if err := s.db.UpdateUserName(user.ID, athleteName); err != nil {
+				fmt.Printf("Failed to update user name: %v\n", err)
+			} else {
+				user.Name = athleteName // Update the local copy
+			}
 		}
 	}
 
@@ -111,9 +148,13 @@ func (s *Service) handleCallback(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Successfully authenticated with Strava",
-		"userId":  user.ID,
-		"scope":   "activity:read_all,activity:read",
-	})
+	// Redirect to frontend OAuth callback with user data
+	frontendURL := fmt.Sprintf(
+		"http://localhost:3001/oauth/callback?user_id=%d&user_name=%s&strava_id=%d&success=true",
+		user.ID,
+		user.Name, // Use the name we already fetched and stored/updated
+		user.StravaID,
+	)
+
+	c.Redirect(http.StatusFound, frontendURL)
 }

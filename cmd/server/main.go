@@ -54,6 +54,10 @@ func main() {
 	commentService := coverage.NewCommentService(db, cfg)
 	commentService.RegisterCommentRoutes(r)
 
+	// Register custom areas endpoints
+	customAreasService := coverage.NewCustomAreasService(db)
+	customAreasService.RegisterCustomAreaRoutes(r)
+
 	// Register automation and webhook endpoints
 	automationService := coverage.NewAutomationService(db, cfg, coverageService, commentService)
 	automationService.RegisterAutomationRoutes(r)

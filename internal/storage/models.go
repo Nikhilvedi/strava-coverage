@@ -34,6 +34,7 @@ func GetTokenByUserID(db *DB, token *StravaToken, userID string) error {
 type User struct {
 	ID        int       `db:"id"`
 	StravaID  int64     `db:"strava_id"`
+	Name      string    `db:"name"`
 	CreatedAt time.Time `db:"created_at"`
 	UpdatedAt time.Time `db:"updated_at"`
 }
@@ -50,14 +51,14 @@ type StravaToken struct {
 }
 
 // CreateUser creates a new user in the database
-func (db *DB) CreateUser(stravaID int64) (*User, error) {
+func (db *DB) CreateUser(stravaID int64, name string) (*User, error) {
 	query := `
-        INSERT INTO users (strava_id)
-        VALUES ($1)
-        RETURNING id, strava_id, created_at, updated_at`
+        INSERT INTO users (strava_id, name)
+        VALUES ($1, $2)
+        RETURNING id, strava_id, name, created_at, updated_at`
 
 	user := &User{}
-	err := db.QueryRowx(query, stravaID).StructScan(user)
+	err := db.QueryRowx(query, stravaID, name).StructScan(user)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (db *DB) CreateUser(stravaID int64) (*User, error) {
 // GetUserByStravaID retrieves a user by their Strava ID
 func (db *DB) GetUserByStravaID(stravaID int64) (*User, error) {
 	query := `
-        SELECT id, strava_id, created_at, updated_at
+        SELECT id, strava_id, name, created_at, updated_at
         FROM users
         WHERE strava_id = $1`
 
@@ -77,6 +78,17 @@ func (db *DB) GetUserByStravaID(stravaID int64) (*User, error) {
 		return nil, err
 	}
 	return user, nil
+}
+
+// UpdateUserName updates a user's name
+func (db *DB) UpdateUserName(userID int, name string) error {
+	query := `
+        UPDATE users 
+        SET name = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2`
+
+	_, err := db.Exec(query, name, userID)
+	return err
 }
 
 // UpsertStravaToken creates or updates Strava tokens for a user
@@ -108,4 +120,16 @@ func (db *DB) GetStravaToken(userID int) (*StravaToken, error) {
 		return nil, err
 	}
 	return token, nil
+}
+
+// CustomArea represents a user-drawn custom area
+type CustomArea struct {
+	ID                 int       `db:"id" json:"id"`
+	UserID             int       `db:"user_id" json:"user_id"`
+	Name               string    `db:"name" json:"name"`
+	Geometry           string    `db:"geometry" json:"geometry"` // PostGIS geometry as WKT
+	CoveragePercentage *float64  `db:"coverage_percentage" json:"coverage_percentage"`
+	ActivitiesCount    int       `db:"activities_count" json:"activities_count"`
+	CreatedAt          time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time `db:"updated_at" json:"updated_at"`
 }
