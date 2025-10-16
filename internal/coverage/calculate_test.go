@@ -10,23 +10,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-// MockDB is a mock implementation of the database for testing
+// MockDB is a simplified mock implementation for testing
 type MockDB struct {
-	mock.Mock
+	// Simplified mock without complex mocking for now
 }
 
 func (m *MockDB) QueryRow(query string, args ...interface{}) *sql.Row {
-	// This is a simplified mock - in a real implementation you'd need more sophisticated mocking
+	// This is a simplified mock - returns nil for basic testing
 	return nil
 }
 
 func (m *MockDB) Close() error {
-	args := m.Called()
-	return args.Error(0)
+	return nil
 }
 
 func TestNewCoverageService(t *testing.T) {

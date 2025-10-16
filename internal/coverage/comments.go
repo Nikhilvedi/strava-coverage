@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-resty/resty/v2"
+	resty "github.com/go-resty/resty/v2"
 	"github.com/nikhilvedi/strava-coverage/config"
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
 )

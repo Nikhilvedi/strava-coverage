@@ -37,7 +37,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Failed to close database connection: %v", err)
+		}
+	}()
 
 	// Configure Gin mode
 	if os.Getenv("GIN_MODE") != "" {

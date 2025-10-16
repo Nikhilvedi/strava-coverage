@@ -11,7 +11,7 @@ import (
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
 
 	// "github.com/jmoiron/sqlx"
-	"github.com/go-resty/resty/v2"
+	resty "github.com/go-resty/resty/v2"
 )
 
 type ImportService struct {
