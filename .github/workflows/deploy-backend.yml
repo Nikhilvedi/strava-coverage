@@ -81,7 +81,7 @@ jobs:
 
     - name: Deploy to Cloud Run (Basic)
       run: |
-        echo "Deploying basic Cloud Run service first..."
+        echo "Deploying Cloud Run service with database connection..."
         gcloud run deploy $SERVICE_NAME \
           --image us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA \
           --region $REGION \
@@ -91,20 +91,20 @@ jobs:
           --memory 512Mi \
           --cpu 1 \
           --max-instances 10 \
+          --timeout 300 \
           --set-env-vars GIN_MODE=release \
-          --project $PROJECT_ID \
-          --verbosity=debug
+          --set-secrets DB_URL=database-connection:latest \
+          --add-cloudsql-instances ${{ secrets.CLOUDSQL_INSTANCE }} \
+          --project $PROJECT_ID
 
-    - name: Update with Secrets and Cloud SQL
+    - name: Update with Strava API Secrets
       run: |
-        echo "Adding secrets and Cloud SQL connection..."
+        echo "Adding Strava API secrets..."
         gcloud run services update $SERVICE_NAME \
           --region $REGION \
           --update-secrets STRAVA_CLIENT_ID=strava-client-id:latest \
           --update-secrets STRAVA_CLIENT_SECRET=strava-client-secret:latest \
           --update-secrets STRAVA_REDIRECT_URI=strava-redirect-uri:latest \
-          --update-secrets DB_URL=database-connection:latest \
-          --add-cloudsql-instances ${{ secrets.CLOUDSQL_INSTANCE }} \
           --project $PROJECT_ID
 
     - name: Get service URL
