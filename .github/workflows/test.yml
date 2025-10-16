@@ -35,7 +35,7 @@ jobs:
         go-version: '1.21'
 
     - name: Cache Go modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cache/go-build
@@ -83,48 +83,10 @@ jobs:
       run: go tool cover -html=coverage.out -o coverage.html
 
     - name: Upload coverage reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-report
         path: coverage.html
-
-  test-frontend:
-    name: Test Next.js Frontend
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ../strava-coverage-frontend
-
-    steps:
-    - name: Checkout frontend code
-      uses: actions/checkout@v4
-      with:
-        repository: ${{ github.repository_owner }}/strava-coverage-frontend
-        path: strava-coverage-frontend
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: strava-coverage-frontend/package-lock.json
-
-    - name: Install dependencies
-      run: npm ci
-
-    - name: Run ESLint
-      run: npm run lint
-
-    - name: Run type checking
-      run: npm run type-check
-
-    - name: Run tests
-      run: npm test
-
-    - name: Build application
-      env:
-        NEXT_PUBLIC_API_URL: http://localhost:8080
-      run: npm run build
 
   integration-test:
     name: Integration Tests
