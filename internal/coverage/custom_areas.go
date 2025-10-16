@@ -333,11 +333,12 @@ func (s *CustomAreasService) calculateCoverageAsync(areaID, userID int) {
 		-- Spatial clustering analysis
 		cluster_analysis AS (
 			SELECT 
-				COUNT(CASE WHEN direct_coverage > 0 THEN 1 END) as covered_clusters,
+				COUNT(CASE WHEN cl.direct_coverage > 0 THEN 1 END) as covered_clusters,
 				-- Calculate coverage density (covered points per sq km)
-				(SELECT COUNT(CASE WHEN direct_coverage > 0 THEN 1 END)::float / 
-				 (ab.area_sqm / 1000000.0)) as coverage_density_per_sqkm
-			FROM coverage_layers cl, area_bounds ab
+				COUNT(CASE WHEN cl.direct_coverage > 0 THEN 1 END)::float / 
+				 (ab.area_sqm / 1000000.0) as coverage_density_per_sqkm
+			FROM coverage_layers cl
+			CROSS JOIN area_bounds ab
 		)
 		SELECT 
 			-- Primary coverage percentage (direct coverage)
