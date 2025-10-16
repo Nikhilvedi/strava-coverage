@@ -5,20 +5,40 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikhilvedi/strava-coverage/internal/storage"
 	"github.com/nikhilvedi/strava-coverage/internal/utils"
 )
 
+// RecalculationStatus tracks the progress of bulk coverage recalculation
+type RecalculationStatus struct {
+	JobID      string     `json:"job_id"`
+	Status     string     `json:"status"` // "running", "completed", "error"
+	Progress   int        `json:"progress"`
+	Total      int        `json:"total"`
+	Updated    int        `json:"updated"`
+	Errors     int        `json:"errors"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Message    string     `json:"message,omitempty"`
+}
+
 // CoverageService handles coverage calculation operations
 type CoverageService struct {
-	DB *storage.DB
+	DB     *storage.DB
+	jobs   map[string]*RecalculationStatus
+	jobsMu sync.RWMutex
 }
 
 // NewCoverageService creates a new coverage service
 func NewCoverageService(db *storage.DB) *CoverageService {
-	return &CoverageService{DB: db}
+	return &CoverageService{
+		DB:   db,
+		jobs: make(map[string]*RecalculationStatus),
+	}
 }
 
 // RegisterCoverageRoutes adds coverage calculation endpoints
@@ -26,6 +46,8 @@ func (s *CoverageService) RegisterCoverageRoutes(r *gin.Engine) {
 	coverage := r.Group("/api/coverage")
 	{
 		coverage.POST("/calculate/:activityId", s.CalculateCoverageHandler)
+		coverage.POST("/recalculate-all", s.RecalculateAllCoverageHandler)
+		coverage.GET("/recalculate-status/:jobId", s.GetRecalculationStatusHandler)
 		coverage.GET("/user/:userId/city/:cityId", s.GetUserCityCoverageHandler)
 		coverage.GET("/activity/:activityId", s.GetActivityCoverageHandler)
 	}
@@ -122,14 +144,14 @@ func (s *CoverageService) CalculateCoverageHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-// calculateGridBasedCoverage calculates coverage using a simplified distance-based approach
+// calculateGridBasedCoverage calculates coverage using a distance-based approach with better estimates
 func (s *CoverageService) calculateGridBasedCoverage(userID int, activityID int64, cityID int, cityName string) (*CoverageResult, error) {
-	// Simplified coverage calculation based on total distance covered within the city
-	// This is much faster than grid-based approach
+	// Simplified but more realistic coverage calculation
+	// Uses total distance covered vs estimated explorable distance, with better city-specific estimates
 
 	coverageQuery := `
 		WITH 
-		-- Get city area for normalization
+		-- Get city boundary and area
 		city_info AS (
 			SELECT 
 				ST_Area(ST_Transform(boundary, 3857)) / 1000000 as area_km2
@@ -138,31 +160,37 @@ func (s *CoverageService) calculateGridBasedCoverage(userID int, activityID int6
 		-- Calculate total distance of user activities in this city
 		user_distance AS (
 			SELECT 
-				COALESCE(SUM(ST_Length(ST_Transform(ST_Intersection(a.path, c.boundary), 3857)) / 1000), 0) as total_km
+				COALESCE(SUM(ST_Length(ST_Transform(a.path, 3857)) / 1000), 0) as total_distance_km,
+				COUNT(*) as activity_count
 			FROM activities a
-			JOIN cities c ON c.id = $2
-			WHERE a.user_id = $3 AND a.city_id = $2
+			WHERE a.user_id = $2 AND a.city_id = $1 AND a.path IS NOT NULL
 		),
-		-- Estimate total "explorable" distance in city (rough approximation)
+		-- More realistic estimate based on city size and type
 		city_explorable AS (
 			SELECT 
-				-- Rough estimate: 10-15 km of roads per km² in urban areas
-				area_km2 * 12 as estimated_roads_km
-			FROM city_info
+				ci.area_km2,
+				-- More conservative estimate: varies by city size
+				CASE 
+					WHEN ci.area_km2 < 50 THEN ci.area_km2 * 80    -- Dense small cities: 80 km/km²
+					WHEN ci.area_km2 < 200 THEN ci.area_km2 * 60   -- Medium cities: 60 km/km²
+					WHEN ci.area_km2 < 500 THEN ci.area_km2 * 40   -- Large cities: 40 km/km²
+					ELSE ci.area_km2 * 30                          -- Very large areas: 30 km/km²
+				END as estimated_explorable_km
+			FROM city_info ci
 		)
 		SELECT 
-			ce.estimated_roads_km as total_streets_km,
-			ud.total_km as covered_streets_km,
+			ce.estimated_explorable_km as total_streets_km,
+			ud.total_distance_km as covered_distance_km,
 			CASE 
-				WHEN ce.estimated_roads_km > 0 THEN 
-					LEAST((ud.total_km / ce.estimated_roads_km) * 100, 100)
+				WHEN ce.estimated_explorable_km > 0 THEN 
+					LEAST((ud.total_distance_km / ce.estimated_explorable_km) * 100, 100)
 				ELSE 0 
 			END as coverage_percentage
 		FROM city_explorable ce, user_distance ud`
 
 	var totalStreetsKm, coveredStreetsKm, coveragePercent float64
 
-	err := s.DB.QueryRow(coverageQuery, cityID, cityID, userID).Scan(
+	err := s.DB.QueryRow(coverageQuery, cityID, userID).Scan(
 		&totalStreetsKm, &coveredStreetsKm, &coveragePercent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate coverage: %v", err)
@@ -179,6 +207,148 @@ func (s *CoverageService) calculateGridBasedCoverage(userID int, activityID int6
 	}
 
 	return result, nil
+}
+
+// RecalculateAllCoverageHandler starts an asynchronous recalculation job
+func (s *CoverageService) RecalculateAllCoverageHandler(c *gin.Context) {
+	// Generate unique job ID
+	jobID := fmt.Sprintf("recalc_%d", time.Now().Unix())
+
+	// Create initial job status
+	job := &RecalculationStatus{
+		JobID:     jobID,
+		Status:    "running",
+		StartedAt: time.Now(),
+		Message:   "Starting recalculation...",
+	}
+
+	s.jobsMu.Lock()
+	s.jobs[jobID] = job
+	s.jobsMu.Unlock()
+
+	// Start background job
+	go s.performRecalculation(jobID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"job_id":  jobID,
+		"status":  "started",
+		"message": "Recalculation job started in background",
+	})
+}
+
+// GetRecalculationStatusHandler returns the status of a recalculation job
+func (s *CoverageService) GetRecalculationStatusHandler(c *gin.Context) {
+	jobID := c.Param("jobId")
+
+	s.jobsMu.RLock()
+	job, exists := s.jobs[jobID]
+	s.jobsMu.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, job)
+}
+
+// performRecalculation runs the actual recalculation in the background
+func (s *CoverageService) performRecalculation(jobID string) {
+
+	// Get all activities that have been assigned to cities
+	query := `
+		SELECT a.strava_activity_id, a.user_id, a.city_id, ci.name
+		FROM activities a
+		JOIN cities ci ON a.city_id = ci.id
+		WHERE a.city_id IS NOT NULL`
+
+	rows, err := s.DB.Query(query)
+	if err != nil {
+		s.updateJobStatus(jobID, "error", 0, 0, 0, 0, "Failed to fetch activities")
+		return
+	}
+	defer rows.Close()
+
+	// Count total activities first
+	var activities []struct {
+		activityID int64
+		userID     int
+		cityID     int
+		cityName   string
+	}
+
+	for rows.Next() {
+		var activity struct {
+			activityID int64
+			userID     int
+			cityID     int
+			cityName   string
+		}
+
+		err := rows.Scan(&activity.activityID, &activity.userID, &activity.cityID, &activity.cityName)
+		if err != nil {
+			continue
+		}
+		activities = append(activities, activity)
+	}
+
+	total := len(activities)
+	s.updateJobStatus(jobID, "running", 0, total, 0, 0, fmt.Sprintf("Processing %d activities", total))
+
+	var updated, errors int
+
+	for i, activity := range activities {
+		// Recalculate coverage for this activity
+		result, err := s.calculateGridBasedCoverage(activity.userID, activity.activityID, activity.cityID, activity.cityName)
+		if err != nil {
+			errors++
+		} else {
+			// Update the activity with the new coverage
+			updateQuery := `
+				UPDATE activities 
+				SET coverage_percentage = $1, updated_at = CURRENT_TIMESTAMP
+				WHERE strava_activity_id = $2`
+
+			_, err = s.DB.Exec(updateQuery, result.CoveragePercent, activity.activityID)
+			if err != nil {
+				errors++
+			} else {
+				updated++
+			}
+		}
+
+		// Update progress every 5 activities or at the end (more frequent updates)
+		if (i+1)%5 == 0 || i == total-1 {
+			progress := ((i + 1) * 100) / total
+			message := fmt.Sprintf("Processed %d/%d activities (updated: %d, errors: %d)", i+1, total, updated, errors)
+			s.updateJobStatus(jobID, "running", progress, total, updated, errors, message)
+		}
+	}
+
+	// Mark as completed
+	finishedAt := time.Now()
+	s.jobsMu.Lock()
+	if job := s.jobs[jobID]; job != nil {
+		job.Status = "completed"
+		job.Progress = 100
+		job.FinishedAt = &finishedAt
+		job.Message = fmt.Sprintf("Recalculation complete: %d updated, %d errors", updated, errors)
+	}
+	s.jobsMu.Unlock()
+}
+
+// updateJobStatus updates the job status thread-safely
+func (s *CoverageService) updateJobStatus(jobID, status string, progress, total, updated, errors int, message string) {
+	s.jobsMu.Lock()
+	if job := s.jobs[jobID]; job != nil {
+		job.Status = status
+		job.Progress = progress
+		job.Total = total
+		job.Updated = updated
+		job.Errors = errors
+		job.Message = message
+	}
+	s.jobsMu.Unlock()
 }
 
 // GetUserCityCoverageHandler returns overall coverage for a user in a specific city

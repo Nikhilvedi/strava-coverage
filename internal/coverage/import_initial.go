@@ -144,7 +144,7 @@ func (s *InitialImportService) performInitialImport(userID int) {
 		for _, activity := range activities {
 			// Only import running/cycling activities with GPS data
 			if s.shouldImportActivity(activity) {
-				err := s.importSingleActivity(userID, activity.ID, tokenPtr.AccessToken)
+				err := s.importSingleActivity(userID, activity.ID, activity.Type, activity.SportType, tokenPtr.AccessToken)
 				if err != nil {
 					log.Printf("Failed to import activity %d: %v", activity.ID, err)
 					totalFailed++
@@ -227,7 +227,7 @@ func (s *InitialImportService) shouldImportActivity(activity StravaActivitySumma
 }
 
 // importSingleActivity imports a single activity with streams
-func (s *InitialImportService) importSingleActivity(userID int, activityID int64, accessToken string) error {
+func (s *InitialImportService) importSingleActivity(userID int, activityID int64, activityType, sportType, accessToken string) error {
 	// Check if activity already exists
 	var count int
 	err := s.DB.QueryRow("SELECT COUNT(*) FROM activities WHERE strava_activity_id = $1", activityID).Scan(&count)
@@ -277,6 +277,8 @@ func (s *InitialImportService) importSingleActivity(userID int, activityID int64
 			user_id, 
 			strava_activity_id, 
 			path,
+			activity_type,
+			sport_type,
 			city_id,
 			coverage_percentage,
 			comment_posted,
@@ -284,12 +286,13 @@ func (s *InitialImportService) importSingleActivity(userID int, activityID int64
 			updated_at
 		) VALUES (
 			$1, $2, ST_GeomFromText($3, 4326),
+			$4, $5,
 			NULL, NULL, false,
 			CURRENT_TIMESTAMP,
 			CURRENT_TIMESTAMP
 		)`
 
-	_, err = s.DB.Exec(query, userID, activityID, linestring)
+	_, err = s.DB.Exec(query, userID, activityID, linestring, activityType, sportType)
 	return err
 }
 

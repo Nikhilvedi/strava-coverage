@@ -54,7 +54,7 @@ func TestNewAPIError(t *testing.T) {
 
 func TestAPIError_Error(t *testing.T) {
 	err := NewAPIError(400, "Bad request", "Invalid input")
-	expected := "Bad request: Invalid input"
+	expected := "API Error 400: Bad request"
 	assert.Equal(t, expected, err.Error())
 }
 

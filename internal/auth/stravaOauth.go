@@ -3,7 +3,9 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,17 +28,19 @@ type StravaTokenResponse struct {
 
 // Service handles Strava OAuth authentication
 type Service struct {
-	config *config.Config
-	client *resty.Client
-	db     *storage.DB
+	config        *config.Config
+	client        *resty.Client
+	db            *storage.DB
+	autoProcessor *AutoProcessor
 }
 
 // NewService creates a new auth service
 func NewService(cfg *config.Config, db *storage.DB) *Service {
 	return &Service{
-		config: cfg,
-		client: resty.New(),
-		db:     db,
+		config:        cfg,
+		client:        resty.New(),
+		db:            db,
+		autoProcessor: NewAutoProcessor(db, cfg),
 	}
 }
 
@@ -52,6 +56,8 @@ func (s *Service) SetupRoutes(r *gin.Engine) {
 	users := r.Group("/api/users")
 	{
 		users.GET("/:id", s.GetUserHandler)
+		users.GET("/:id/processing-status", s.GetProcessingStatusHandler)
+		users.POST("/:id/discover-cities", s.DiscoverCitiesHandler)
 	}
 }
 
@@ -148,13 +154,106 @@ func (s *Service) handleCallback(c *gin.Context) {
 		return
 	}
 
+	// Start automatic processing in background (non-blocking)
+	go func() {
+		if err := s.autoProcessor.ProcessUserOnLogin(user.ID, tokenResp.AccessToken); err != nil {
+			fmt.Printf("Auto-processing failed for user %d: %v\n", user.ID, err)
+		}
+	}()
+
 	// Redirect to frontend OAuth callback with user data
 	frontendURL := fmt.Sprintf(
-		"http://localhost:3001/oauth/callback?user_id=%d&user_name=%s&strava_id=%d&success=true",
+		"http://localhost:3000/oauth/callback?user_id=%d&user_name=%s&strava_id=%d&success=true",
 		user.ID,
 		user.Name, // Use the name we already fetched and stored/updated
 		user.StravaID,
 	)
 
 	c.Redirect(http.StatusFound, frontendURL)
+}
+
+// GetProcessingStatusHandler returns the processing status for a user
+func (s *Service) GetProcessingStatusHandler(c *gin.Context) {
+	userIDStr := c.Param("id")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	// Check if user has activities
+	var activityCount, citiesCount int
+	err = s.db.QueryRow("SELECT COUNT(*) FROM activities WHERE user_id = $1", userID).Scan(&activityCount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check activity count"})
+		return
+	}
+
+	err = s.db.QueryRow(`
+		SELECT COUNT(DISTINCT city_id) 
+		FROM activities 
+		WHERE user_id = $1 AND city_id IS NOT NULL`, userID).Scan(&citiesCount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check cities count"})
+		return
+	}
+
+	// Check if coverage has been calculated
+	var coverageCount int
+	err = s.db.QueryRow(`
+		SELECT COUNT(*) 
+		FROM activities 
+		WHERE user_id = $1 AND coverage_percentage IS NOT NULL`, userID).Scan(&coverageCount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check coverage count"})
+		return
+	}
+
+	status := "not_started"
+	if activityCount > 0 {
+		if citiesCount > 0 {
+			if coverageCount > 0 {
+				status = "completed"
+			} else {
+				status = "calculating_coverage"
+			}
+		} else {
+			status = "mapping_cities"
+		}
+	} else {
+		status = "importing_activities"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user_id":        userID,
+		"status":         status,
+		"activity_count": activityCount,
+		"cities_count":   citiesCount,
+		"coverage_count": coverageCount,
+	})
+}
+
+// DiscoverCitiesHandler manually triggers city discovery for a user
+func (s *Service) DiscoverCitiesHandler(c *gin.Context) {
+	userIDStr := c.Param("id")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	// Run city discovery in background
+	go func() {
+		log.Printf("Starting manual city discovery for user %d", userID)
+		if err := s.autoProcessor.mapActivitiesToCities(userID); err != nil {
+			log.Printf("City discovery failed for user %d: %v", userID, err)
+		} else {
+			log.Printf("City discovery completed for user %d", userID)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "City discovery started for user " + userIDStr,
+		"user_id": userID,
+	})
 }

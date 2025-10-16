@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
@@ -36,16 +37,16 @@ func NewCityService(db *storage.DB) *CityService {
 	}
 }
 
-// RegisterCityRoutes adds city management endpoints
+// RegisterCityRoutes registers all city-related routes
 func (s *CityService) RegisterCityRoutes(r *gin.Engine) {
 	cities := r.Group("/api/cities")
 	{
 		cities.GET("/", s.GetCitiesHandler)
+		cities.GET("/user/:userId", s.GetUserCitiesHandler)
+		cities.GET("/user/:userId/coverage", s.GetUserCitiesWithCoverageHandler)
 		cities.GET("/search", s.SearchCitiesHandler)
-		cities.POST("/external", s.CreateCityFromExternalHandler)
-		cities.GET("/:id", s.GetCityHandler)
-		cities.GET("/:id/boundary", s.GetCityBoundaryHandler)
 		cities.POST("/", s.CreateCityHandler)
+		cities.GET("/:id", s.GetCityHandler)
 	}
 }
 
@@ -91,6 +92,117 @@ func (s *CityService) GetCitiesHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, cities)
+}
+
+// GetUserCitiesHandler returns only cities where the user has activities/coverage
+func (s *CityService) GetUserCitiesHandler(c *gin.Context) {
+	userIDStr := c.Param("userId")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	query := `
+		SELECT DISTINCT
+			c.id, 
+			c.name, 
+			c.country_code,
+			ST_Area(ST_Transform(c.boundary, 3857)) / 1000000 AS area_km2
+		FROM cities c
+		INNER JOIN activities a ON a.city_id = c.id 
+		WHERE a.user_id = $1
+		ORDER BY c.name`
+
+	rows, err := s.DB.Query(query, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user cities"})
+		return
+	}
+	defer rows.Close()
+
+	var cities []City
+	for rows.Next() {
+		var city City
+		err := rows.Scan(&city.ID, &city.Name, &city.CountryCode, &city.AreaKm2)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan city"})
+			return
+		}
+		cities = append(cities, city)
+	}
+
+	c.JSON(http.StatusOK, cities)
+}
+
+// GetUserCitiesWithCoverageHandler returns cities where the user has activities with coverage statistics
+func (s *CityService) GetUserCitiesWithCoverageHandler(c *gin.Context) {
+	userIDStr := c.Param("userId")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	query := `
+		SELECT 
+			c.id,
+			c.name,
+			c.country_code,
+			ST_Area(ST_Transform(c.boundary, 3857)) / 1000000 AS area_km2,
+			COUNT(a.id) as activity_count,
+			COALESCE(AVG(a.coverage_percentage), 0) as avg_coverage_percentage,
+			COALESCE(MAX(a.coverage_percentage), 0) as max_coverage_percentage,
+			COALESCE(SUM(a.distance_km), 0) as total_distance_km,
+			MAX(a.created_at) as last_activity_date
+		FROM cities c
+		INNER JOIN activities a ON a.city_id = c.id 
+		WHERE a.user_id = $1
+		GROUP BY c.id, c.name, c.country_code, c.boundary
+		ORDER BY activity_count DESC, avg_coverage_percentage DESC
+		LIMIT 4`
+
+	rows, err := s.DB.Query(query, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user cities with coverage"})
+		return
+	}
+	defer rows.Close()
+
+	type CityWithCoverage struct {
+		City
+		ActivityCount          int     `json:"activity_count"`
+		AverageCoveragePercent float64 `json:"average_coverage_percent"`
+		MaxCoveragePercent     float64 `json:"max_coverage_percent"`
+		TotalDistanceKm        float64 `json:"total_distance_km"`
+		LastActivityDate       string  `json:"last_activity_date"`
+	}
+
+	var cities []CityWithCoverage
+	for rows.Next() {
+		var city CityWithCoverage
+		var lastActivityDate *time.Time
+		err := rows.Scan(
+			&city.ID, &city.Name, &city.CountryCode, &city.AreaKm2,
+			&city.ActivityCount, &city.AverageCoveragePercent, &city.MaxCoveragePercent,
+			&city.TotalDistanceKm, &lastActivityDate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan city with coverage"})
+			return
+		}
+
+		if lastActivityDate != nil {
+			city.LastActivityDate = lastActivityDate.Format("2006-01-02")
+		}
+
+		cities = append(cities, city)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user_id": userID,
+		"cities":  cities,
+		"count":   len(cities),
+	})
 }
 
 // SearchCitiesHandler searches for cities by name, using both local database and external API

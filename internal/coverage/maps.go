@@ -237,7 +237,9 @@ func (s *MapService) GetUserActivitiesGeoJSONHandler(c *gin.Context) {
 			a.coverage_percentage,
 			c.name as city_name,
 			c.country_code,
-			ST_Length(ST_Transform(a.path, 3857)) / 1000 as distance_km
+			ST_Length(ST_Transform(a.path, 3857)) / 1000 as distance_km,
+			a.activity_type,
+			a.sport_type
 		FROM activities a
 		LEFT JOIN cities c ON a.city_id = c.id
 		WHERE a.user_id = $1 AND a.path IS NOT NULL`
@@ -270,8 +272,9 @@ func (s *MapService) GetUserActivitiesGeoJSONHandler(c *gin.Context) {
 		var coverage *float64
 		var cityName, countryCode *string
 		var distanceKm float64
+		var activityType, sportType *string
 
-		if err := rows.Scan(&activityID, &pathJSON, &coverage, &cityName, &countryCode, &distanceKm); err != nil {
+		if err := rows.Scan(&activityID, &pathJSON, &coverage, &cityName, &countryCode, &distanceKm, &activityType, &sportType); err != nil {
 			continue
 		}
 
@@ -292,6 +295,12 @@ func (s *MapService) GetUserActivitiesGeoJSONHandler(c *gin.Context) {
 		if cityName != nil {
 			properties["city_name"] = *cityName
 			properties["country_code"] = *countryCode
+		}
+		if activityType != nil {
+			properties["activity_type"] = *activityType
+		}
+		if sportType != nil {
+			properties["sport_type"] = *sportType
 		}
 
 		feature := GeoJSONFeature{
