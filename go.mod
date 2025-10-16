@@ -1,6 +1,6 @@
 module github.com/nikhilvedi/strava-coverage
 
-go 1.25.2
+go 1.23.0
 
 require (
 	github.com/gin-gonic/gin v1.11.0
@@ -34,7 +34,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect

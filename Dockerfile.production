@@ -1,4 +1,4 @@
-# Multi-stage build for optimized production image
+# Multi-stage build for optimized production image  
 FROM golang:1.21-alpine AS builder
 
 # Install build dependencies
