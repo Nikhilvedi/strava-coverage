@@ -31,6 +31,29 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Validate secrets
+      run: |
+        echo "Checking required secrets..."
+        if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+          echo "❌ GCP_PROJECT_ID secret is not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+          echo "❌ GCP_SA_KEY secret is not set"
+          exit 1
+        fi
+        echo "✅ Required secrets are present"
+        
+        # Validate JSON format (first few characters)
+        echo "Validating GCP_SA_KEY format..."
+        if [[ "${{ secrets.GCP_SA_KEY }}" == "{"* ]]; then
+          echo "✅ GCP_SA_KEY appears to be JSON format"
+        else
+          echo "❌ GCP_SA_KEY does not appear to be JSON format"
+          echo "First 20 characters: $(echo '${{ secrets.GCP_SA_KEY }}' | cut -c1-20)"
+          exit 1
+        fi
+
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
@@ -42,7 +65,9 @@ jobs:
       
     - name: Verify authentication
       run: |
+        echo "Checking authentication..."
         gcloud auth list
+        echo "Checking project configuration..."
         gcloud config get-value project
 
     - name: Configure Docker for GCR

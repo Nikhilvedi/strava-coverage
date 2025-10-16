@@ -72,8 +72,19 @@ cat github-sa-key.json
 
 ### ❌ "must specify exactly one of workload_identity_provider or credentials_json"
 
-**Solution**: Make sure the `GCP_SA_KEY` secret contains valid JSON:
+**This error means the GCP_SA_KEY secret is missing or incorrectly formatted.**
 
+**Quick Fix**: Use the secrets generator script:
+```bash
+./scripts/generate-github-secrets.sh
+```
+
+**If you get "project number" error**:
+```bash
+./scripts/fix-gcloud-config.sh
+```
+
+**Manual Check**: The `GCP_SA_KEY` secret must contain valid JSON like:
 ```json
 {
   "type": "service_account",
@@ -88,6 +99,12 @@ cat github-sa-key.json
   "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/github-actions%40your-project-id.iam.gserviceaccount.com"
 }
 ```
+
+**Common Issues**:
+- ❌ Secret is empty or not set
+- ❌ Secret contains only part of the JSON
+- ❌ Secret has extra spaces or newlines
+- ❌ Secret is missing quotes or brackets
 
 ### ❌ "The project property must be set to a valid project ID"
 

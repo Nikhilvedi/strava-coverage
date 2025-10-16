@@ -3,6 +3,13 @@
 .env.*
 !.env.example
 
+# Service account keys and secrets
+*-key.json
+*-sa-key.json
+github-sa-key.json
+service-account-key.json
+gcp-key.json
+
 # Go binaries and build files
 *.exe
 *.exe~
