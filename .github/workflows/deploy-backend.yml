@@ -68,16 +68,18 @@ jobs:
 
     - name: Verify secrets and resources
       run: |
-        echo "Checking if secrets exist..."
-        gcloud secrets describe strava-client-id --project=$PROJECT_ID || echo "strava-client-id secret missing"
-        gcloud secrets describe strava-client-secret --project=$PROJECT_ID || echo "strava-client-secret secret missing"
-        gcloud secrets describe strava-redirect-uri --project=$PROJECT_ID || echo "strava-redirect-uri secret missing"
-        gcloud secrets describe database-connection --project=$PROJECT_ID || echo "database-connection secret missing"
+        echo "✅ Checking if secrets exist..."
+        gcloud secrets describe strava-client-id --project=$PROJECT_ID > /dev/null 2>&1 && echo "✅ strava-client-id exists" || echo "❌ strava-client-id missing"
+        gcloud secrets describe strava-client-secret --project=$PROJECT_ID > /dev/null 2>&1 && echo "✅ strava-client-secret exists" || echo "❌ strava-client-secret missing"
+        gcloud secrets describe strava-redirect-uri --project=$PROJECT_ID > /dev/null 2>&1 && echo "✅ strava-redirect-uri exists" || echo "❌ strava-redirect-uri missing"
+        gcloud secrets describe database-connection --project=$PROJECT_ID > /dev/null 2>&1 && echo "✅ database-connection exists" || echo "❌ database-connection missing"
         
-        echo "Checking Cloud SQL instance..."
+        echo "✅ Checking Cloud SQL instance..."
         INSTANCE_NAME=$(echo "${{ secrets.CLOUDSQL_INSTANCE }}" | cut -d':' -f3)
-        gcloud sql instances describe $INSTANCE_NAME --project=$PROJECT_ID || echo "Cloud SQL instance not found"
-        echo "Cloud SQL connection string: ${{ secrets.CLOUDSQL_INSTANCE }}"
+        gcloud sql instances describe $INSTANCE_NAME --project=$PROJECT_ID > /dev/null 2>&1 && echo "✅ Cloud SQL instance ($INSTANCE_NAME) exists" || echo "❌ Cloud SQL instance not found"
+        echo "📋 Cloud SQL connection string: ${{ secrets.CLOUDSQL_INSTANCE }}"
+        
+        echo "🚀 Proceeding with deployment..."
 
     - name: Deploy to Cloud Run (Basic)
       run: |
