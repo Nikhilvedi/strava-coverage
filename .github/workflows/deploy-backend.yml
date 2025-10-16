@@ -75,7 +75,9 @@ jobs:
         gcloud secrets describe database-connection --project=$PROJECT_ID || echo "database-connection secret missing"
         
         echo "Checking Cloud SQL instance..."
-        gcloud sql instances describe ${{ secrets.CLOUDSQL_INSTANCE }} --project=$PROJECT_ID || echo "Cloud SQL instance not found"
+        INSTANCE_NAME=$(echo "${{ secrets.CLOUDSQL_INSTANCE }}" | cut -d':' -f3)
+        gcloud sql instances describe $INSTANCE_NAME --project=$PROJECT_ID || echo "Cloud SQL instance not found"
+        echo "Cloud SQL connection string: ${{ secrets.CLOUDSQL_INSTANCE }}"
 
     - name: Deploy to Cloud Run (Basic)
       run: |
