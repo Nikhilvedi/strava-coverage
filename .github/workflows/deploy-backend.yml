@@ -51,25 +51,25 @@ jobs:
         echo "Checking project configuration..."
         gcloud config get-value project
 
-    - name: Configure Docker for GCR
-      run: gcloud auth configure-docker
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker us-central1-docker.pkg.dev
 
     - name: Build and push Docker image
       run: |
         # Build the image
-        docker build -f Dockerfile.production -t gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA .
+        docker build -f Dockerfile.production -t us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA .
         
-        # Push to Google Container Registry
-        docker push gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA
+        # Push to Artifact Registry
+        docker push us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA
         
         # Tag as latest
-        docker tag gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA gcr.io/$PROJECT_ID/$SERVICE_NAME:latest
-        docker push gcr.io/$PROJECT_ID/$SERVICE_NAME:latest
+        docker tag us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:latest
+        docker push us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:latest
 
     - name: Deploy to Cloud Run
       run: |
         gcloud run deploy $SERVICE_NAME \
-          --image gcr.io/$PROJECT_ID/$SERVICE_NAME:$GITHUB_SHA \
+          --image us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA \
           --region $REGION \
           --platform managed \
           --allow-unauthenticated \
