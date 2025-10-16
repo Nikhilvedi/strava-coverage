@@ -178,7 +178,7 @@ func (s *CommentService) postStravaComment(activityID int64, comment string, acc
 	}
 
 	if resp.StatusCode() < 200 || resp.StatusCode() >= 300 {
-		return fmt.Errorf("Strava API error: %d - %s", resp.StatusCode(), string(resp.Body()))
+		return fmt.Errorf("strava API error: %d - %s", resp.StatusCode(), string(resp.Body()))
 	}
 
 	return nil

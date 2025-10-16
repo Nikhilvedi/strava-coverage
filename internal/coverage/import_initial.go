@@ -193,7 +193,7 @@ func (s *InitialImportService) fetchActivitiesPage(accessToken string, page, per
 	}
 
 	if resp.StatusCode() != 200 {
-		return nil, false, fmt.Errorf("Strava API error: %d - %s", resp.StatusCode(), string(resp.Body()))
+		return nil, false, fmt.Errorf("strava API error: %d - %s", resp.StatusCode(), string(resp.Body()))
 	}
 
 	var activities []StravaActivitySummary

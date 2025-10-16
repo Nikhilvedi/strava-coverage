@@ -114,14 +114,6 @@ func TestCalculateCoverageHandler_InvalidActivityID(t *testing.T) {
 	assert.Contains(t, response["message"], "Invalid activity ID")
 }
 
-// Test helper functions
-func createTestRouter(service *CoverageService) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	service.RegisterCoverageRoutes(router)
-	return router
-}
-
 func TestCoveragePercentageCalculation(t *testing.T) {
 	tests := []struct {
 		name            string
