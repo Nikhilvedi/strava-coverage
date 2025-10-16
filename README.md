@@ -233,3 +233,4 @@ Required environment variables:
 ## License
 
 MIT License# Thu Oct 16 23:15:09 BST 2025
+# Deployment fix: Thu Oct 16 23:50:27 BST 2025
