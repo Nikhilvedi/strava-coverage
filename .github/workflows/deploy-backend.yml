@@ -66,23 +66,42 @@ jobs:
         docker tag us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:latest
         docker push us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:latest
 
-    - name: Deploy to Cloud Run
+    - name: Verify secrets and resources
       run: |
+        echo "Checking if secrets exist..."
+        gcloud secrets describe strava-client-id --project=$PROJECT_ID || echo "strava-client-id secret missing"
+        gcloud secrets describe strava-client-secret --project=$PROJECT_ID || echo "strava-client-secret secret missing"
+        gcloud secrets describe strava-redirect-uri --project=$PROJECT_ID || echo "strava-redirect-uri secret missing"
+        gcloud secrets describe database-connection --project=$PROJECT_ID || echo "database-connection secret missing"
+        
+        echo "Checking Cloud SQL instance..."
+        gcloud sql instances describe ${{ secrets.CLOUDSQL_INSTANCE }} --project=$PROJECT_ID || echo "Cloud SQL instance not found"
+
+    - name: Deploy to Cloud Run (Basic)
+      run: |
+        echo "Deploying basic Cloud Run service first..."
         gcloud run deploy $SERVICE_NAME \
           --image us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA \
           --region $REGION \
           --platform managed \
           --allow-unauthenticated \
-          --service-account github-actions@$PROJECT_ID.iam.gserviceaccount.com \
           --port 8080 \
           --memory 512Mi \
           --cpu 1 \
           --max-instances 10 \
           --set-env-vars GIN_MODE=release \
-          --set-secrets STRAVA_CLIENT_ID=strava-client-id:latest \
-          --set-secrets STRAVA_CLIENT_SECRET=strava-client-secret:latest \
-          --set-secrets STRAVA_REDIRECT_URI=strava-redirect-uri:latest \
-          --set-secrets DB_URL=database-connection:latest \
+          --project $PROJECT_ID \
+          --verbosity=debug
+
+    - name: Update with Secrets and Cloud SQL
+      run: |
+        echo "Adding secrets and Cloud SQL connection..."
+        gcloud run services update $SERVICE_NAME \
+          --region $REGION \
+          --update-secrets STRAVA_CLIENT_ID=strava-client-id:latest \
+          --update-secrets STRAVA_CLIENT_SECRET=strava-client-secret:latest \
+          --update-secrets STRAVA_REDIRECT_URI=strava-redirect-uri:latest \
+          --update-secrets DB_URL=database-connection:latest \
           --add-cloudsql-instances ${{ secrets.CLOUDSQL_INSTANCE }} \
           --project $PROJECT_ID
 
