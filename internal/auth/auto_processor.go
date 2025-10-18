@@ -125,7 +125,7 @@ func (ap *AutoProcessor) importAllActivities(userID int, accessToken string) err
 			}
 
 			if resp.StatusCode() != 200 {
-				return fmt.Errorf("Strava API error: %d - %s", resp.StatusCode(), string(resp.Body()))
+				return fmt.Errorf("strava API error: %d - %s", resp.StatusCode(), string(resp.Body()))
 			}
 
 			// Parse successful response
@@ -196,6 +196,8 @@ type StravaActivity struct {
 
 // importSingleActivity imports a single activity with detailed data
 // TODO: This function will be used for selective activity import in future versions
+//
+//nolint:unused // This method is reserved for future functionality
 func (ap *AutoProcessor) importSingleActivity(userID int, accessToken string, activity StravaActivity) error {
 	// Check if activity already exists
 	var existingID int64
@@ -505,6 +507,8 @@ func (ap *AutoProcessor) calculateCityCoverage(userID, cityID int) error {
 
 // discoverAndCreateCitiesForUnmappedActivities finds unmapped activities and creates cities for them
 // TODO: This function will be used for automatic city discovery in future versions
+//
+//nolint:unused // This method is reserved for future functionality
 func (ap *AutoProcessor) discoverAndCreateCitiesForUnmappedActivities(userID int) error {
 	// Find unique coordinate clusters for unmapped activities
 	query := `

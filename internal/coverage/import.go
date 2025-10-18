@@ -87,45 +87,60 @@ func (s *ImportService) ImportActivityHandler(c *gin.Context) {
 		}
 	}
 
-	if len(latlngData) == 0 {
-		fmt.Printf("No valid latlng data found in stream\n")
-		fmt.Printf("Raw JSON structure: %+v\n", rawJSON)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No valid latlng stream found"})
-		return
-	}
+	// Handle activities with or without GPS data
+	var linestring string
+	var query string
 
 	if len(latlngData) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No latlng stream found"})
-		return
-	}
-
-	// Convert to WKT LINESTRING
-	var points []string
-	for _, ll := range latlngData {
-		if len(ll) == 2 {
-			points = append(points, fmt.Sprintf("%f %f", ll[1], ll[0])) // WKT: lon lat
+		fmt.Printf("No GPS data found - importing activity without path (indoor activity)\n")
+		// Insert activity without path for indoor activities
+		query = `INSERT INTO activities (
+			user_id, 
+			strava_activity_id, 
+			path,
+			city_id,
+			coverage_percentage,
+			comment_posted,
+			created_at,
+			updated_at
+		) VALUES (
+			$1, $2, NULL,
+			NULL, -- city_id - no coverage for indoor activities
+			NULL, -- coverage_percentage - no coverage for indoor activities
+			false,
+			CURRENT_TIMESTAMP,
+			CURRENT_TIMESTAMP
+		)`
+	} else {
+		// Convert to WKT LINESTRING
+		var points []string
+		for _, ll := range latlngData {
+			if len(ll) == 2 {
+				points = append(points, fmt.Sprintf("%f %f", ll[1], ll[0])) // WKT: lon lat
+			}
 		}
-	}
-	linestring := fmt.Sprintf("LINESTRING(%s)", strings.Join(points, ", "))
+		linestring = fmt.Sprintf("LINESTRING(%s)", strings.Join(points, ", "))
+		fmt.Printf("GPS data found - importing activity with path\n")
 
-	// Insert into activities
-	query := `INSERT INTO activities (
-		user_id, 
-		strava_activity_id, 
-		path,
-		city_id,
-		coverage_percentage,
-		comment_posted,
-		created_at,
-		updated_at
-	) VALUES (
-		$1, $2, ST_GeomFromText($3, 4326),
-		NULL, -- city_id will be updated later
-		NULL, -- coverage_percentage will be calculated later
-		false,
-		CURRENT_TIMESTAMP,
-		CURRENT_TIMESTAMP
-	)`
+		// Insert activity with path for outdoor activities
+		query = `INSERT INTO activities (
+			user_id, 
+			strava_activity_id, 
+			path,
+			city_id,
+			coverage_percentage,
+			comment_posted,
+			created_at,
+			updated_at
+		) VALUES (
+			$1, $2, ST_GeomFromText($3, 4326),
+			NULL, -- city_id will be updated later
+			NULL, -- coverage_percentage will be calculated later
+			false,
+			CURRENT_TIMESTAMP,
+			CURRENT_TIMESTAMP
+		)`
+	}
 	fmt.Printf("Executing query with userID=%s, activityID=%s\n", userID, activityID)
 	fmt.Printf("Linestring sample: %.100s...\n", linestring)
 
@@ -170,12 +185,24 @@ func (s *ImportService) ImportActivityHandler(c *gin.Context) {
 		return
 	}
 
-	_, err = s.DB.Exec(query, userIDInt, activityIDInt, linestring)
+	// Execute query with appropriate parameters
+	if len(latlngData) == 0 {
+		// Indoor activity - no path
+		_, err = s.DB.Exec(query, userIDInt, activityIDInt)
+	} else {
+		// Outdoor activity - with path
+		_, err = s.DB.Exec(query, userIDInt, activityIDInt, linestring)
+	}
+
 	if err != nil {
 		fmt.Printf("Database error: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to insert activity: %v", err)})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Activity imported", "linestring": linestring})
+	if len(latlngData) == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "Indoor activity imported (no GPS data)", "has_path": false})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "Activity imported", "linestring": linestring, "has_path": true})
+	}
 }

@@ -258,41 +258,65 @@ func (s *InitialImportService) importSingleActivity(userID int, activityID int64
 		return fmt.Errorf("failed to parse streams: %v", err)
 	}
 
+	// Handle activities with or without GPS data
+	var query string
+
 	if len(latlngData) == 0 {
-		return fmt.Errorf("no GPS data found")
-	}
+		// Indoor activity - no GPS data
+		query = `
+			INSERT INTO activities (
+				user_id, 
+				strava_activity_id, 
+				path,
+				activity_type,
+				sport_type,
+				city_id,
+				coverage_percentage,
+				comment_posted,
+				created_at,
+				updated_at
+			) VALUES (
+				$1, $2, NULL,
+				$3, $4,
+				NULL, NULL, false,
+				CURRENT_TIMESTAMP,
+				CURRENT_TIMESTAMP
+			)`
 
-	// Convert to WKT LINESTRING
-	var points []string
-	for _, ll := range latlngData {
-		if len(ll) == 2 {
-			points = append(points, fmt.Sprintf("%f %f", ll[1], ll[0])) // WKT: lon lat
+		_, err = s.DB.Exec(query, userID, activityID, activityType, sportType)
+	} else {
+		// Outdoor activity - has GPS data
+		// Convert to WKT LINESTRING
+		var points []string
+		for _, ll := range latlngData {
+			if len(ll) == 2 {
+				points = append(points, fmt.Sprintf("%f %f", ll[1], ll[0])) // WKT: lon lat
+			}
 		}
+		linestring := fmt.Sprintf("LINESTRING(%s)", strings.Join(points, ", "))
+
+		query = `
+			INSERT INTO activities (
+				user_id, 
+				strava_activity_id, 
+				path,
+				activity_type,
+				sport_type,
+				city_id,
+				coverage_percentage,
+				comment_posted,
+				created_at,
+				updated_at
+			) VALUES (
+				$1, $2, ST_GeomFromText($3, 4326),
+				$4, $5,
+				NULL, NULL, false,
+				CURRENT_TIMESTAMP,
+				CURRENT_TIMESTAMP
+			)`
+
+		_, err = s.DB.Exec(query, userID, activityID, linestring, activityType, sportType)
 	}
-	linestring := fmt.Sprintf("LINESTRING(%s)", strings.Join(points, ", "))
-
-	// Insert into database
-	query := `
-		INSERT INTO activities (
-			user_id, 
-			strava_activity_id, 
-			path,
-			activity_type,
-			sport_type,
-			city_id,
-			coverage_percentage,
-			comment_posted,
-			created_at,
-			updated_at
-		) VALUES (
-			$1, $2, ST_GeomFromText($3, 4326),
-			$4, $5,
-			NULL, NULL, false,
-			CURRENT_TIMESTAMP,
-			CURRENT_TIMESTAMP
-		)`
-
-	_, err = s.DB.Exec(query, userID, activityID, linestring, activityType, sportType)
 	return err
 }
 

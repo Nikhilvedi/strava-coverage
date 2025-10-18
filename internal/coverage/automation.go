@@ -171,38 +171,60 @@ func (s *AutomationService) importActivityByID(activityID int64, userID int) err
 		}
 	}
 
+	// Handle activities with or without GPS data
+	var query string
+
 	if len(latlngData) == 0 {
-		return fmt.Errorf("no latlng data found in activity")
-	}
+		// Indoor activity - no GPS data
+		query = `
+			INSERT INTO activities (
+				user_id, 
+				strava_activity_id, 
+				path,
+				city_id,
+				coverage_percentage,
+				comment_posted,
+				created_at,
+				updated_at
+			) VALUES (
+				$1, $2, NULL,
+				NULL, NULL, false,
+				CURRENT_TIMESTAMP,
+				CURRENT_TIMESTAMP
+			) ON CONFLICT (strava_activity_id) DO NOTHING`
 
-	// Convert to WKT LINESTRING
-	var points []string
-	for _, ll := range latlngData {
-		if len(ll) == 2 {
-			points = append(points, fmt.Sprintf("%f %f", ll[1], ll[0])) // WKT: lon lat
+		_, err = s.DB.Exec(query, userID, activityID)
+	} else {
+		// Outdoor activity - has GPS data
+		// Convert to WKT LINESTRING
+		var points []string
+		for _, ll := range latlngData {
+			if len(ll) == 2 {
+				points = append(points, fmt.Sprintf("%f %f", ll[1], ll[0])) // WKT: lon lat
+			}
 		}
+		linestring := fmt.Sprintf("LINESTRING(%s)", strings.Join(points, ", "))
+
+		query = `
+			INSERT INTO activities (
+				user_id, 
+				strava_activity_id, 
+				path,
+				city_id,
+				coverage_percentage,
+				comment_posted,
+				created_at,
+				updated_at
+			) VALUES (
+				$1, $2, ST_GeomFromText($3, 4326),
+				NULL, NULL, false,
+				CURRENT_TIMESTAMP,
+				CURRENT_TIMESTAMP
+			) ON CONFLICT (strava_activity_id) DO NOTHING`
+
+		_, err = s.DB.Exec(query, userID, activityID, linestring)
 	}
-	linestring := fmt.Sprintf("LINESTRING(%s)", strings.Join(points, ", "))
 
-	// Insert into database
-	query := `
-		INSERT INTO activities (
-			user_id, 
-			strava_activity_id, 
-			path,
-			city_id,
-			coverage_percentage,
-			comment_posted,
-			created_at,
-			updated_at
-		) VALUES (
-			$1, $2, ST_GeomFromText($3, 4326),
-			NULL, NULL, false,
-			CURRENT_TIMESTAMP,
-			CURRENT_TIMESTAMP
-		) ON CONFLICT (strava_activity_id) DO NOTHING`
-
-	_, err = s.DB.Exec(query, userID, activityID, linestring)
 	return err
 }
 
