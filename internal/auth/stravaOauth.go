@@ -163,7 +163,8 @@ func (s *Service) handleCallback(c *gin.Context) {
 
 	// Redirect to frontend OAuth callback with user data
 	frontendURL := fmt.Sprintf(
-		"http://localhost:3000/oauth/callback?user_id=%d&user_name=%s&strava_id=%d&success=true",
+		"%s/oauth/callback?user_id=%d&user_name=%s&strava_id=%d&success=true",
+		s.config.FrontendURL,
 		user.ID,
 		user.Name, // Use the name we already fetched and stored/updated
 		user.StravaID,

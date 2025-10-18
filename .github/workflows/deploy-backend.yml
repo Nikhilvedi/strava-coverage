@@ -102,12 +102,13 @@ jobs:
 
     - name: Update with Strava API Secrets
       run: |
-        echo "Adding Strava API secrets..."
+        echo "Adding Strava API secrets and frontend URL..."
         gcloud run services update $SERVICE_NAME \
           --region $REGION \
           --update-secrets STRAVA_CLIENT_ID=strava-client-id:latest \
           --update-secrets STRAVA_CLIENT_SECRET=strava-client-secret:latest \
           --update-secrets STRAVA_REDIRECT_URI=strava-redirect-uri:latest \
+          --update-secrets FRONTEND_URL=frontend-url:latest \
           --project $PROJECT_ID
 
     - name: Get service URL
@@ -124,3 +125,12 @@ jobs:
         # Test health endpoint
         curl -f $SERVICE_URL/api/health || exit 1
         echo "Health check passed!"
+
+    - name: Display deployment info
+      run: |
+        echo "🚀 Backend deployed successfully!"
+        echo "📍 Service URL: $SERVICE_URL"
+        echo "🔗 Health Check: $SERVICE_URL/api/health"
+        echo ""
+        echo "📋 For frontend deployment, set NEXT_PUBLIC_API_URL to:"
+        echo "$SERVICE_URL"
